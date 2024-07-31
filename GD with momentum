@@ -1,0 +1,365 @@
+import numpy as np
+import matplotlib.pyplot as plt
+
+def normalize(X):
+    mean = np.mean(X, axis=0)
+    std = np.std(X, axis=0)
+    return (X - mean) / std, mean, std
+
+class MultiLayerPerceptron:
+    def __init__(self, input_size, hidden_layers, output_size, activation_function,error_stop=0.0001):
+        self.input_size = input_size
+        self.hidden_layers = hidden_layers
+        self.output_size = output_size
+        self.activation_function = activation_function
+        self.beta1 = 0
+        self.weights = []
+        self.biases = []
+        self.error_plot = []
+        self.error_val_plot = []
+        self.error_stop = error_stop
+
+        self.weights.append(np.random.rand(self.input_size, self.hidden_layers[0]))
+        self.biases.append(np.random.rand(1, self.hidden_layers[0]))
+
+        for i in range(1, len(self.hidden_layers)):
+            self.weights.append(np.random.rand(self.hidden_layers[i-1], self.hidden_layers[i]))
+            self.biases.append(np.random.rand(1, self.hidden_layers[i]))
+
+        self.weights.append(np.random.rand(self.hidden_layers[-1], self.output_size))
+        self.biases.append(np.random.rand(1, self.output_size))
+
+        self.m_weights = [np.zeros_like(w) for w in self.weights]
+        self.v_weights = [np.zeros_like(w) for w in self.weights]
+        self.m_biases = [np.zeros_like(b) for b in self.biases]
+        self.v_biases = [np.zeros_like(b) for b in self.biases]
+        self.t = 0
+
+    def mean_squared_error(self, y_true, y_pred):
+        return np.mean((y_true - y_pred) ** 2)
+
+    def activation(self, x):
+        if self.activation_function == "sigmoid":
+            return 1 / (1 + np.exp(-x))
+        elif self.activation_function == "relu":
+            return np.where(x > 0, x, 0.0)
+        elif self.activation_function == "tanh":
+            return np.tanh(x)
+        elif self.activation_function == "linear":
+            return x
+
+    def activation_diff(self, x):
+        if self.activation_function == "sigmoid":
+            return x * (1 - x)
+        elif self.activation_function == "relu":
+            return np.where(x > 0, 1.0, 0.0)
+        elif self.activation_function == "tanh":
+            return 1 - x**2
+        elif self.activation_function == "linear":
+            return np.ones_like(x)
+
+    def forward(self, X):
+        self.layer_inputs = [X]
+        self.layer_outputs = []
+
+        for i in range(len(self.hidden_layers)):
+            layer_input = np.dot(self.layer_inputs[i], self.weights[i]) + self.biases[i]
+            layer_output = self.activation(layer_input)
+            self.layer_inputs.append(layer_input)
+            self.layer_outputs.append(layer_output)
+        
+        final_input = np.dot(self.layer_outputs[-1], self.weights[-1]) + self.biases[-1]
+        final_output = self.activation(final_input)
+        self.layer_inputs.append(final_input)
+        self.layer_outputs.append(final_output)
+
+        return final_output
+
+    def backward(self, X, y, learning_rate, beta1, beta2, epsilon):
+        self.t += 1
+        output_error = y - self.layer_outputs[-1]
+        output_delta = output_error * self.activation_diff(self.layer_outputs[-1])
+        deltas = [output_delta]
+
+        for i in range(len(self.hidden_layers)-1, -1, -1):
+            delta = deltas[-1].dot(self.weights[i+1].T) * self.activation_diff(self.layer_outputs[i])
+            deltas.append(delta)
+        
+        deltas.reverse()
+
+        for i in range(len(self.weights)):
+            layer_output = X if i == 0 else self.layer_outputs[i-1]
+
+            weight_gradient = layer_output.T.dot(deltas[i])
+            bias_gradient = np.sum(deltas[i], axis=0, keepdims=True)
+
+            self.m_weights[i] = beta1 * self.m_weights[i] + (1 - beta1) * weight_gradient
+            self.m_biases[i] = beta1 * self.m_biases[i] + (1 - beta1) * bias_gradient
+
+            self.v_weights[i] = beta2 * self.v_weights[i] + (1 - beta2) * (weight_gradient ** 2)
+            self.v_biases[i] = beta2 * self.v_biases[i] + (1 - beta2) * (bias_gradient ** 2)
+
+            m_hat_weights = self.m_weights[i] / (1 - beta1 ** self.t)
+            m_hat_biases = self.m_biases[i] / (1 - beta1 ** self.t)
+
+            v_hat_weights = self.v_weights[i] / (1 - beta2 ** self.t)
+            v_hat_biases = self.v_biases[i] / (1 - beta2 ** self.t)
+
+            self.weights[i] += learning_rate * m_hat_weights / (np.sqrt(v_hat_weights) + epsilon)
+            self.biases[i] += learning_rate * m_hat_biases / (np.sqrt(v_hat_biases) + epsilon)
+
+    def train(self, X, y, epochs, learning_rate, beta1=0.9, beta2=0.999, epsilon=1e-8):
+        X, mean, std = normalize(X)
+        self.beta1 = beta1
+        self.mean = mean
+        self.std = std
+        
+        indices = np.arange(X.shape[0])
+        np.random.shuffle(indices)
+        split_index = int(0.9 * X.shape[0])
+        train_indices, val_indices = indices[:split_index], indices[split_index:]
+        
+        X_train, X_val = X[train_indices], X[val_indices]
+        y_train, y_val = y[train_indices], y[val_indices]
+        """ self.error_plot = []
+        self.error_val_plot = [] """
+
+        for epoch in range(epochs):
+            indices_xy_train = np.arange(X_train.shape[0])
+            np.random.shuffle(indices_xy_train)
+            X_train = X_train[indices_xy_train]
+            y_train = y_train[indices_xy_train]
+
+            self.forward(X_train)
+            self.backward(X_train, y_train, learning_rate, beta1, beta2, epsilon)
+            
+            y_t = np.array(normalize(y_train))
+            o_t = np.array(normalize(self.layer_outputs[-1]))
+            train_loss = self.mean_squared_error(y_t, o_t)
+            
+            val_output = self.forward(X_val)
+            v_o_t = np.array(normalize(val_output))
+            y_v_t = np.array(normalize(y_val))
+            val_loss = self.mean_squared_error(y_v_t, v_o_t)
+            """ print(np.mean(train_loss))
+            print(55555)
+            print(np.mean(val_loss)) """
+            
+            self.error_plot.append(np.mean(train_loss))
+            self.error_val_plot.append(np.mean(val_loss))
+            if np.mean(train_loss) <self.error_stop:
+                break
+            if epoch % 1000 == 0:
+                
+                
+                print(f"Epoch {epoch}, Training MSE: {np.mean(train_loss)}, Validation MSE: {np.mean(val_loss)}")
+
+    def predict(self, X):
+        X = (X - self.mean) / self.std
+        return self.forward(X)
+    def predict_classify(self, X):
+        X = (X - self.mean) / self.std
+        k1= self.forward(X)
+        if k1[0][0] >k1[0][1]:
+            return [1,0]
+        else:
+            return [0,1]
+        
+
+def read_dataset_1():
+    f = open("Flood_dataset.txt", "r")
+    data = []
+    for i in f:
+        data.append(i.split())
+
+    data = np.array(data[2:len(data)])
+    x_train = []
+    y_train = []
+    for i in data:
+        z = []
+        x_train.append(i[:8])
+        z.append(i[-1])
+        y_train.append(z)
+
+    y_train = np.array(y_train)   
+    x_train = np.array(x_train)
+    y_train = y_train.astype(np.int64)
+    x_train = x_train.astype(np.int64)
+    return x_train, y_train
+
+def read_dataset_2(filename='cross.txt'):
+    data = []
+    input = []
+    design_output = []
+    with open(filename) as f:
+        a = f.readlines()
+        for line in range(1, len(a), 3):
+            z = np.array([float(element) for element in a[line][:-1].split()])
+            zz = np.array([float(element) for element in a[line+1].split()])
+            data.append(np.append(z, zz))
+    data = np.array(data)
+    #np.random.shuffle(data)
+    for i in data:
+        input.append(i[:-2])
+        design_output.append(i[-2:])
+    design_output = np.array(design_output)   
+    input = np.array(input)
+    design_output = design_output.astype(np.int16)
+    input = input.astype(np.float16)
+    return input, design_output
+
+# 
+np.random.seed(42)
+#For Regression
+X, y = read_dataset_1()
+input_size1 = 8
+hidden_layers1 = [32,16,16,16]
+output_size1 = 1
+learning_rate1 = 0.0001
+epochs1 = 40000
+
+MLP_waterlevel = MultiLayerPerceptron(input_size1, hidden_layers1, output_size1, "relu")
+MLP_waterlevel.train(X, y, epochs1, learning_rate1, beta1=0.9)
+
+output_NN1 = []
+y_plot1 = []
+i = 0
+
+for x in X:
+    output = MLP_waterlevel.predict(np.array([x]))
+    output_NN1.append(output[0])
+    y_plot1.append(y[i][0])
+    print(f"Input: {x}, Output: {y[i]} Predicted: {output}")
+    i += 1
+
+#For classify
+input2 , design_out2 = read_dataset_2()
+input_size2 = 2
+hidden_layers2 = [16,16]
+output_size2 = 2
+learning_rate2 = 0.0001
+epochs2 = 30000
+
+MLP_Class = MultiLayerPerceptron(input_size2, hidden_layers2, output_size2, "sigmoid")
+MLP_Class.train(input2, design_out2, epochs2, learning_rate2, beta1=0.9)
+#print(input2 , design_out2)
+
+# Function to compute confusion matrix
+
+def compute_confusion_matrix(y_true, y_pred):
+    
+    # Unique label tuples
+    
+    #print(unique_labels)
+    label_to_index = {label: index for index, label in enumerate(unique_labels)}
+    matrix = np.zeros((len(unique_labels), len(unique_labels)), dtype=int)
+
+    for true, pred in zip(y_true, y_pred):
+        true_idx = label_to_index[true]
+        pred_idx = label_to_index[pred]
+        matrix[true_idx, pred_idx] += 1
+    t = 0
+    f = 0
+    for i in range(len(matrix[0])):
+        for j in range(len(matrix)):
+            if i==j:
+                t+=matrix[i][j]
+                f+=matrix[i][j]
+            else:
+                f+=matrix[i][j]
+    #print(matrix)
+    return matrix,(t/f*100)
+
+def plot_confusion_matrix(cm,acc, labels):
+    fig, ax = plt.subplots()
+    cax = ax.matshow(cm, cmap=plt.cm.Blues)
+    fig.colorbar(cax)
+
+    for (i, j), val in np.ndenumerate(cm):
+        ax.text(j, i, val, ha='center', va='center', color='red')
+
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('True')
+    ax.set_xticks(np.arange(len(labels)))
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_xticklabels(labels)
+    ax.set_yticklabels(labels)
+
+    plt.title(f"Confusion Matrix Accuracy = {acc}%")
+    
+
+
+
+output_NN2 = []
+y_plot2 = []
+i = 0
+
+for x in input2:
+    output = MLP_Class.predict_classify(np.array([x]))
+    output_NN2.append(output)
+    y_plot2.append((np.array(design_out2[i])).tolist())
+    print(f"Input: {x}, Output: {design_out2[i]} Predicted: {output}")
+    i += 1
+    
+#print((y_plot2, output_NN2))
+y_plot2 = np.array(y_plot2)
+output_NN2 = np.array(output_NN2)
+""" y_plot2 = (y_plot2.reshape(len(y_plot2), 2))#.tolist()
+output_NN2 = (output_NN2.reshape(len(y_plot2), 2))#.tolist() """
+y_plot2_flat =  [tuple(row) for row in y_plot2]
+output_NN2_flat =  [tuple(row) for row in output_NN2]
+#print((y_plot2), (output_NN2))
+#print(type(y_plot2), type(output_NN2))
+unique_labels = sorted(set(y_plot2_flat + output_NN2_flat))
+#print(unique_labels)
+# Flatten the 2D arrays to 1D tuples
+
+plot1 = plt.subplot2grid((3, 2), (0, 0), colspan=1) 
+plot2 = plt.subplot2grid((3, 2), (0, 1), colspan=1) 
+plot3 = plt.subplot2grid((3, 2), (2, 0), rowspan=1, colspan=2) 
+
+
+#print(MLP_waterlevel.error_plot)
+p1 =np.array(MLP_waterlevel.error_plot).flatten()
+#print(len(p1))
+plot1.plot(p1)
+plot1.set_title('MSE')
+
+#print(MLP_waterlevel.error_val_plot)
+plot2.plot(np.array(MLP_waterlevel.error_val_plot).flatten())
+plot2.set_title('MSE VAL')
+
+plot3.plot(y_plot1)
+plot3.plot(output_NN1)
+plot3.set_title(f'Water level Hidden layer {hidden_layers1} ,Train {epochs1} epochs' +"\n"+f'Learning Rate:{learning_rate2} Activate Function:{MLP_waterlevel.activation_function} Momentum:{MLP_waterlevel.beta1}')
+
+""" plt.figure()
+plt.title(f"Water level Hidden layer {hidden_layers1} ,Train {epochs1} epochs")
+plt.plot(y_plot1)
+plt.plot(output_NN1) """
+
+
+cm ,acc = compute_confusion_matrix(y_plot2_flat, output_NN2_flat)
+plot_confusion_matrix(cm,acc ,unique_labels)
+
+plt.figure(3)
+
+
+plot4 = plt.subplot2grid((3, 1), (0, 0), colspan=1) 
+plot5 = plt.subplot2grid((3, 1), (2, 0), colspan=1) 
+
+p4 = np.array(MLP_Class.error_val_plot).flatten()
+#print(len(p4))
+plot4.plot(p4)
+plot4.set_title('MSE')
+
+#print(MLP_waterlevel.error_val_plot)
+plot5.plot(np.array(MLP_Class.error_val_plot).flatten())
+plot5.set_title('MSE VAL')
+plt.suptitle(f"Classification Hidden Layer {hidden_layers2} Train:{epochs2} epochs" +"\n"+ f"Learning Rate:{learning_rate2} Activate Function:{MLP_Class.activation_function} Momentum:{MLP_Class.beta1}")
+plt.show()
+""" plt.figure(1)
+plt.plot(y_plot2,"bo")
+plt.figure(2)
+plt.plot(output_NN2,"ro")
+plt.show() """
